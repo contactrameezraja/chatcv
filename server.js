@@ -9,23 +9,42 @@ const PORT = process.env.PORT || 8000;
 // --- Config ---
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const DAILY_LIMIT = parseInt(process.env.DAILY_MESSAGE_CAP || '50');
+const ALLOWED_ORIGINS = [
+  'https://chatcv-ah5j.onrender.com',
+  'http://localhost:8000',
+  'http://localhost:5173',
+];
+
+// --- CORS protection for API routes ---
+app.use('/api', (req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'POST');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Block requests from unknown origins
+  if (req.method === 'POST' && origin && !ALLOWED_ORIGINS.includes(origin)) {
+    return res.status(403).json({ error: 'Origin not allowed' });
+  }
+
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 
 // --- In-memory rate limiting ---
 const dailyCounts = new Map();
 
 function checkRateLimit() {
   const today = new Date().toISOString().split('T')[0];
-
-  // Clean up old dates
   for (const [key] of dailyCounts) {
     if (key !== today) dailyCounts.delete(key);
   }
-
   const count = dailyCounts.get(today) || 0;
   if (count >= DAILY_LIMIT) {
     return { allowed: false, remaining: 0, count };
   }
-
   dailyCounts.set(today, count + 1);
   return { allowed: true, remaining: DAILY_LIMIT - count - 1, count: count + 1 };
 }
@@ -50,7 +69,6 @@ app.post('/api/chat', async (req, res) => {
 
   try {
     const { system, messages } = req.body;
-
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
